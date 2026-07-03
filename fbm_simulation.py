@@ -31,8 +31,13 @@ def simulate_fbm(timepoints: np.ndarray, H: float, noise: np.ndarray) -> np.ndar
     chol = np.linalg.cholesky(cov_matrix(timepoints, H))
     return chol @ noise
 
+def simulate_fgn(timepoints: np.ndarray, H: float, noise: np.ndarray) -> np.ndarray:
+    b_H = simulate_fbm(timepoints, H, noise)
+    x = b_H[1:] - b_H[:-1]
+    return x
 
-def plot_fbm_paths(timepoints: np.ndarray, hurst_values, paths) -> Figure:
+
+def plot_paths(timepoints: np.ndarray, hurst_values, paths) -> Figure:
     """Plot each fBm path in its own panel, styled like a textbook figure"""
     plt.rcParams["mathtext.fontset"] = "cm"
 
@@ -75,13 +80,16 @@ def main() -> None:
     noise = rng.normal(0, 1, len(timepoints))
 
     hurst_values = [0.1, 0.3, 0.5, 0.7, 0.9]
-    paths = [simulate_fbm(timepoints, H, noise) for H in hurst_values]
+    fbm_paths = [simulate_fbm(timepoints, H, noise) for H in hurst_values]
+    fgn_paths = [simulate_fgn(timepoints, H, noise) for H in hurst_values]
 
-    fig = plot_fbm_paths(timepoints, hurst_values, paths)
-
+    fig1 = plot_paths(timepoints, hurst_values, fbm_paths)
+    fig2 = plot_paths(timepoints[:-1], hurst_values, fgn_paths)
     # save as a vector PDF
-    output = Path(__file__).with_name("fbm_paths.pdf")
-    fig.savefig(output, format="pdf", bbox_inches="tight")
+    output_fbm = Path(__file__).with_name("fbm_paths.pdf")
+    output_fgn = Path(__file__).with_name("fgn_paths.pdf")
+    fig1.savefig(output_fbm, format="pdf", bbox_inches="tight")
+    fig2.savefig(output_fgn, format="pdf", bbox_inches="tight")
     plt.show()
 
 
