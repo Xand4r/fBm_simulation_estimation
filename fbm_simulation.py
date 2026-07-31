@@ -28,12 +28,19 @@ def simulate_fbm(timepoints: np.ndarray, H: float, noise: np.ndarray) -> np.ndar
     of the covariance matrix. `noise` is a vector of standard normals; reusing
     the same `noise` across different H isolates the effect of H on the path.
     """
+    if not (0 < H < 1):
+        raise ValueError(f"H must be in (0, 1), got {H}")
     chol = np.linalg.cholesky(cov_matrix(timepoints, H))
     return chol @ noise
 
-def simulate_fgn(timepoints: np.ndarray, H: float, noise: np.ndarray) -> np.ndarray:
+def simulate_fgn(timepoints: np.ndarray, H: float, noise: np.ndarray, lag: int) -> np.ndarray:
+    if not (0 < H < 1):
+        raise ValueError(f"H must be in (0, 1), got {H}")
+    if lag <= 0:
+        raise ValueError(f"lag must be positive, got {lag}")
+
     b_H = simulate_fbm(timepoints, H, noise)
-    x = b_H[1:] - b_H[:-1]
+    x = b_H[lag:] - b_H[:-lag]
     return x
 
 
@@ -98,7 +105,7 @@ def main() -> None:
 
     hurst_values = [0.1, 0.3, 0.5, 0.7, 0.9]
     fbm_paths = [simulate_fbm(timepoints, H, noise) for H in hurst_values]
-    fgn_paths = [simulate_fgn(timepoints, H, noise) for H in hurst_values]
+    fgn_paths = [simulate_fgn(timepoints, H, noise, 1) for H in hurst_values]
 
     fig1 = plot_paths(timepoints, hurst_values, fbm_paths)
     fig2 = plot_paths(timepoints[:-1], hurst_values, fgn_paths)
