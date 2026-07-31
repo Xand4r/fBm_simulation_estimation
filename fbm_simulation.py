@@ -37,6 +37,23 @@ def simulate_fgn(timepoints: np.ndarray, H: float, noise: np.ndarray) -> np.ndar
     return x
 
 
+def _round_step(value: float) -> float:
+    """Rounding step for a bound: 0.1 for numbers of magnitude >= 1, otherwise
+    the place of the biggest non-zero decimal (e.g. 0.0048 -> step 0.001)."""
+    if value == 0:
+        return 0.1
+    return min(0.1, 10.0 ** np.floor(np.log10(abs(value))))
+
+
+def _round_bound(value: float, direction: str) -> tuple[float, str]:
+    """Round `value` outward ('up' or 'down') to its step and return the rounded
+    value together with a label formatted with a matching number of decimals."""
+    step = _round_step(value)
+    rounded = float((np.ceil if direction == "up" else np.floor)(value / step) * step)
+    decimals = max(1, int(-np.floor(np.log10(step))))
+    return rounded, f"{rounded:.{decimals}f}"
+
+
 def plot_paths(timepoints: np.ndarray, hurst_values, paths) -> Figure:
     """Plot each fBm path in its own panel, styled like a textbook figure"""
     plt.rcParams["mathtext.fontset"] = "cm"
@@ -55,13 +72,13 @@ def plot_paths(timepoints: np.ndarray, hurst_values, paths) -> Figure:
         ax.annotate("$0$", xy=(0, 0), xytext=(-12, -10),
                     textcoords="offset points", fontsize=11)
 
-        # round the bounds outward to a 0.1 step and label the y-range
-        lo = np.floor(float(path.min()) / 0.1) * 0.1
-        hi = np.ceil(float(path.max()) / 0.1) * 0.1
+        # round the bounds outward and label the y-range
+        lo, lo_label = _round_bound(float(path.min()), "down")
+        hi, hi_label = _round_bound(float(path.max()), "up")
         ax.set_ylim(lo, hi)
-        ax.annotate(f"${hi:.1f}$", xy=(0, hi), xytext=(-6, 0), ha="right",
+        ax.annotate(f"${hi_label}$", xy=(0, hi), xytext=(-6, 0), ha="right",
                     va="center", textcoords="offset points", fontsize=10)
-        ax.annotate(f"${lo:.1f}$", xy=(0, lo), xytext=(-6, 0), ha="right",
+        ax.annotate(f"${lo_label}$", xy=(0, lo), xytext=(-6, 0), ha="right",
                     va="center", textcoords="offset points", fontsize=10)
         # remove the box borders
         for spine in ax.spines.values():
