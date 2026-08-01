@@ -1,5 +1,4 @@
 from pathlib import Path
-
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.figure import Figure
@@ -33,15 +32,14 @@ def simulate_fbm(timepoints: np.ndarray, H: float, noise: np.ndarray) -> np.ndar
     chol = np.linalg.cholesky(cov_matrix(timepoints, H))
     return chol @ noise
 
-def simulate_fgn(timepoints: np.ndarray, H: float, noise: np.ndarray, lag: int) -> np.ndarray:
-    if not (0 < H < 1):
-        raise ValueError(f"H must be in (0, 1), got {H}")
+def simulate_fgn(b_H: np.ndarray, lag: int) -> np.ndarray:
+    """Increments of a precomputed fBm path at the given lag:
+    x_t = B_H(t + lag) - B_H(t). Taking the fBm path as input (instead of
+    recomputing it) avoids repeating the Cholesky factorisation when the same
+    path is evaluated at many lags."""
     if lag <= 0:
         raise ValueError(f"lag must be positive, got {lag}")
-
-    b_H = simulate_fbm(timepoints, H, noise)
-    x = b_H[lag:] - b_H[:-lag]
-    return x
+    return b_H[lag:] - b_H[:-lag]
 
 
 def _round_step(value: float) -> float:
@@ -105,7 +103,7 @@ def main() -> None:
 
     hurst_values = [0.1, 0.3, 0.5, 0.7, 0.9]
     fbm_paths = [simulate_fbm(timepoints, H, noise) for H in hurst_values]
-    fgn_paths = [simulate_fgn(timepoints, H, noise, 1) for H in hurst_values]
+    fgn_paths = [simulate_fgn(path, 1) for path in fbm_paths]
 
     fig1 = plot_paths(timepoints, hurst_values, fbm_paths)
     fig2 = plot_paths(timepoints[:-1], hurst_values, fgn_paths)
