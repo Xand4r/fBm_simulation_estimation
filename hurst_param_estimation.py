@@ -1,8 +1,21 @@
 import numpy as np
 import matplotlib.pyplot as plt
+from scipy.stats import norm
 import fbm_simulation as fbms
 from pathlib import Path
 from math import gamma, factorial
+
+# Hurst values in their canonical order. Every figure takes a value's colour from
+# its position here rather than from its position in the list it was called with,
+# so a plot showing only a subset of the values still colours them consistently.
+H_PALETTE_ORDER = (0.1, 0.3, 0.5, 0.7, 0.9)
+
+def h_colour(h: float) -> str:
+    """Colour-cycle entry assigned to a Hurst value. Values outside the canonical
+    grid fall back to the nearest one, so they stay comparable to their neighbour
+    (but two such values may end up sharing a colour)."""
+    idx = min(range(len(H_PALETTE_ORDER)), key=lambda i: abs(H_PALETTE_ORDER[i] - h))
+    return f"C{idx}"
 
 def k_mom(k: float, incr: np.ndarray) -> float:
     if k <= 0:
@@ -107,14 +120,12 @@ def ols_estimation(k: float, fgns: dict[int, np.ndarray]) -> tuple[float, float]
 
     return float(estimates[0, 0]), float(estimates[1, 0])
 
-def plot_log_log_scatter(timepoints: np.ndarray, H_values: list[float], noise: np.ndarray, lags: list[int],
+def plot_log_log_scatter(timepoints: np.ndarray, h_values: list[float], noise: np.ndarray, lags: list[int],
                          k: float):
-    if k <= 0:
-        raise ValueError('k must be positive')
     log_lags = np.log(lags)
     fig, ax = plt.subplots(figsize=(7.0, 4.5))
 
-    for h in H_values:
+    for h in h_values:
         b_h = fbms.simulate_fbm(timepoints, h, noise)
         fgns = {}
         log_moments = []
@@ -123,8 +134,8 @@ def plot_log_log_scatter(timepoints: np.ndarray, H_values: list[float], noise: n
             log_moments.append(np.log(k_mom(k, fgns[lag])))
         intercept, slope = ols_estimation(k, fgns)
 
-        points = ax.scatter(log_lags, log_moments, s=12, alpha=0.8, zorder=3)
-        colour = points.get_facecolor()[0]
+        colour = h_colour(h)
+        ax.scatter(log_lags, log_moments, s=12, alpha=0.8, color=colour, zorder=3)
         ax.axline((0, intercept), slope=slope * k, color=colour, linewidth=1.2,
                   label = rf"True $H={h:.2f}$, Estimated $\hat H={slope:.3f}$")
 
@@ -135,6 +146,63 @@ def plot_log_log_scatter(timepoints: np.ndarray, H_values: list[float], noise: n
               title_fontsize=7, framealpha=0.9)
     fig.tight_layout()
     return fig
+
+def distribution_check_plot(simulation_count: int, k: float, h_values: list[float], rng, lags: list[int],
+                            sample_size: int ):
+    centered_estimates = {h: [] for h in h_values}
+    timepoints = np.linspace(1/sample_size, 1, sample_size)
+    cholesky_matrices = {h: np.linalg.cholesky(fbms.cov_matrix(timepoints, h)) for h in h_values}
+    for _ in range(simulation_count):
+        noise = rng.normal(0, 1, sample_size)
+        for h in h_values:
+            fbm = cholesky_matrices[h] @ noise
+            fgns = {lag: fbms.simulate_fgn(fbm, lag) for lag in lags}
+            _, slope = ols_estimation(k, fgns)
+            centered_estimates[h].append(slope - h)
+
+    fig, axes = plt.subplots(len(h_values), 2, figsize=(7.5, 2.6 * len(h_values)),
+                             squeeze=False, layout="constrained")
+    fig.suptitle("Distribution of the Centered Estimator", fontsize=16)
+
+    z_scores = {h: np.asarray(centered_estimates[h]) / np.std(centered_estimates[h]) for h in h_values}
+    # plotting positions, centered in their 1/M slice so the extremes stay finite
+    plot_positions = (np.arange(1, simulation_count + 1) - 0.5) / simulation_count
+    normal_quantiles = norm.ppf(plot_positions)
+    grid = np.linspace(-4.0, 4.0, 400)
+    bins = np.linspace(-4.0, 4.0, 41)
+
+    # column 0: normal QQ plot
+    for row_idx, h in enumerate(h_values):
+        ax = axes[row_idx, 0]
+        z = np.sort(z_scores[h])
+
+        ax.scatter(normal_quantiles, z, s=8, alpha=0.7, color=h_colour(h), zorder=3)
+        ref = ax.axline((0, 0), slope=1, color="#c0392b", linestyle="--", linewidth=1.2,
+                        label="standard normal")
+        ax.set_ylabel(rf"$H = {h}$" "\n" r"sample quantiles", fontsize=9)
+        ax.grid(alpha=0.25)
+        ax.spines[["top", "right"]].set_visible(False)
+        if row_idx == len(h_values) - 1:
+            ax.set_xlabel("theoretical quantiles", fontsize=9)
+        if row_idx == 0:
+            ax.legend(handles=[ref], loc="upper left", fontsize=8, framealpha=0.9)
+
+    # column 1: histogram against the standard normal density
+    for row_idx, h in enumerate(h_values):
+        ax = axes[row_idx, 1]
+        z = z_scores[h]
+
+        ax.hist(z, bins=bins, density=True, color=h_colour(h), alpha=0.55,
+                edgecolor="white", linewidth=0.4)
+        ax.plot(grid, norm.pdf(grid), color="#c0392b", linestyle="--", linewidth=1.2)
+        ax.set_ylabel("density", fontsize=9)
+        ax.grid(axis="y", alpha=0.25)
+        ax.spines[["top", "right"]].set_visible(False)
+        if row_idx == len(h_values) - 1:
+            ax.set_xlabel(r"standardized $\hat H - H$", fontsize=9)
+
+    return fig
+
 
 def consistency_boxplots(rng, h_values: list[float], lags: list[int], k: float, sample_sizes: list[int],
                          simulation_count: int):
@@ -207,13 +275,13 @@ def var_vs_n_plot(min_n: int, max_n: int, rng, h_values:list[float], lags: list[
     rescaled_var = {h: [n * np.var(estimates[h][n]) for n in n_values] for h in h_values}
 
     fig, ax = plt.subplots(figsize=(7.0, 4.5))
-    for i, h in enumerate(h_values):
-        ax.plot(n_values, rescaled_var[h], color=f"C{i}", marker="o", markersize=3,
+    for h in h_values:
+        ax.plot(n_values, rescaled_var[h], color=h_colour(h), marker="o", markersize=3,
                 markeredgecolor="white", markeredgewidth=0.4, linewidth=1.3, alpha=0.9,
                 label=rf"$H={h:.2f}$")
         # asymptotic variance sigma^2_OLS is only defined for H < 3/4
         if h < 0.75:
-            ax.axhline(asymptotic_variance(k, lags, h), color=f"C{i}", linestyle="--",
+            ax.axhline(asymptotic_variance(k, lags, h), color=h_colour(h), linestyle="--",
                        linewidth=1.0, alpha=0.7)
     ax.set_xscale("log")
     ax.set_ylim(0, 1.5)
@@ -244,6 +312,9 @@ def main() -> None:
     fig5 = var_vs_n_plot(6, 5000, rng, hurst_values, list(range(1,5)), 2, 300)
     var_vs_n = Path(__file__).with_name("var_vs_n.pdf")
     fig5.savefig(var_vs_n, format="pdf", bbox_inches="tight")
+    fig6 = distribution_check_plot(1000, 2, [0.1, 0.5, 0.9], rng, list(range(1, 10)), 3000)
+    distr = Path(__file__).with_name("distribution_check.pdf")
+    fig6.savefig(distr, format="pdf", bbox_inches="tight")
     plt.show()
 
 
