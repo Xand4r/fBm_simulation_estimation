@@ -3,7 +3,6 @@ import matplotlib.pyplot as plt
 from scipy.stats import norm
 import fbm_simulation as fbms
 from pathlib import Path
-from math import gamma, factorial
 
 # Hurst values in their canonical order. Every figure takes a value's colour from
 # its position here rather than from its position in the list it was called with,
@@ -41,73 +40,33 @@ def cross_stepsize_correlation(stepsize_1: int, stepsize_2: int, lag, h: float):
                  - np.abs(stepsize_1 - i - stepsize_2) ** two_h - np.abs(i) ** two_h)
     return cov / (stepsize_1 ** h * stepsize_2 ** h)
 
-def _gaussian_abs_moment(p: float) -> float:
-    """E|Z|^p for Z ~ N(0,1): 2^{p/2} / sqrt(pi) * Gamma((p+1)/2)."""
-    return 2.0 ** (p / 2.0) / np.sqrt(np.pi) * gamma((p + 1.0) / 2.0)
+def asymptotic_variance(lags: list[int], h: float, max_corr_lag: int = 20000) -> float:
+    """Asymptotic variance of the OLS Hurst estimator for k = 2, i.e. the limit of
+    N * Var(H_hat_N) for H < 3/4:
 
-def hermite_abs_moment_coeff(k: float, two_j: int) -> float:
-    """The (unnormalised) Hermite coefficient c_{2j} = E[|Z|^k H_{2j}(Z)] of the
-    absolute-power function |x|^k, with H_n the probabilists' Hermite polynomial
-    H_n(x) = n! * sum_{l=0}^{n/2} (-1)^l / (l! (n-2l)! 2^l) x^{n-2l}.
-    Since n = 2j is even, |Z|^k x^{n-2l} = |Z|^{k+n-2l} under the expectation, so
-    the coefficient is a finite sum of Gaussian absolute moments (exact)."""
-    n = two_j
-    total = 0.0
-    for l in range(n // 2 + 1):
-        weight = (-1) ** l * factorial(n) / (factorial(l) * factorial(n - 2 * l) * 2 ** l)
-        total += weight * _gaussian_abs_moment(k + n - 2 * l)
-    return total
+        sigma^2_OLS = A^t G A / (4 ||A||^4),   g_{m,m'} = 2 * sum_i rho_{m,m'}(i)^2,
 
-def asymptotic_variance(k: float, lags: list[int], h: float,
-                        max_hermite: int = 20, max_corr_lag: int = 20000) -> float:
-    """Asymptotic variance sigma^2_OLS(k, M) of the OLS Hurst estimator, i.e. the
-    limit of N * Var(H_hat_N) for H < 3/4 (Theorem):
+    with A_m = log(m) - mean_m log(m) the centred log-lags (the covariate is
+    2*log m, hence the 4 = k^2). The Hermite expansion behind G is a single term
+    here because |x|^2 - E|Z|^2 = H_2(x), so c_2 = 2 and c_{2j} = 0 for j >= 2.
 
-        sqrt(N) (H_hat_N(k, M) - H) -> N(0, sigma^2_OLS(k, M)),
-        sigma^2_OLS(k, M) = A^t G_M(k) A / (k^2 ||A||^4),
-
-    where A_m = log(m) - mean_m log(m) are the centred log-lags (the regression
-    covariate is k*log m, hence the k^2), and G_M(k) has entries
-
-        g_{m,m'} = sum_{j>=1} c_{2j}^2 / (2j)! * sum_{i in Z} rho_{m,m'}(i)^{2j}.
-
-    Here g_{m,m'} is the asymptotic covariance of sqrt(N) * log S_N(k, m); the
-    delta-method 1/E|Z|^k factors are folded into the coefficients, i.e.
-    c_{2j} = E[|Z|^k H_{2j}(Z)] / E|Z|^k. The sum_i rho^{2j} converges iff
-    2j(2-2H) > 1; the binding term j=1 converges exactly for H < 3/4.
-
-    The infinite sums are truncated at `max_hermite` Hermite orders and
-    `max_corr_lag` correlation lags (the i-sum decays like i^{2j(2H-2)}, so it
-    converges slowly as H approaches 3/4 -- raise `max_corr_lag` there)."""
-    if k <= 0:
-        raise ValueError('k must be positive')
+    The i-sum converges iff H < 3/4; it is truncated at `max_corr_lag`, and its
+    terms decay like i^{4H-4}, so raise that near H = 3/4."""
     if not 0 < h < 0.75:
         raise ValueError(f'asymptotic variance requires 0 < H < 3/4, got {h}')
 
     lags_arr = np.asarray(lags, dtype=float)
     a = np.log(lags_arr) - np.mean(np.log(lags_arr))
 
-    # Normalised Hermite coefficients c_{2j} and their weights c_{2j}^2 / (2j)!.
-    mu_k = _gaussian_abs_moment(k)
-    j_values = np.arange(1, max_hermite + 1)
-    coeffs = np.array([hermite_abs_moment_coeff(k, 2 * j) / mu_k for j in j_values])
-    weights = coeffs ** 2 / np.array([float(factorial(2 * j)) for j in j_values])
-
     i = np.arange(-max_corr_lag, max_corr_lag + 1)
     m_count = lags_arr.shape[0]
     g = np.zeros((m_count, m_count))
     for a_idx in range(m_count):
         for b_idx in range(a_idx, m_count):
-            rho2 = cross_stepsize_correlation(lags_arr[a_idx], lags_arr[b_idx], i, h) ** 2
-            power = np.ones_like(rho2)  # rho^0
-            entry = 0.0
-            for w in weights:
-                power = power * rho2     # rho^{2j}
-                entry += w * power.sum()
-            g[a_idx, b_idx] = entry
-            g[b_idx, a_idx] = entry
+            rho = cross_stepsize_correlation(lags_arr[a_idx], lags_arr[b_idx], i, h)
+            g[a_idx, b_idx] = g[b_idx, a_idx] = 2.0 * np.sum(rho ** 2)
 
-    return float((a @ g @ a) / (k ** 2 * (a @ a) ** 2))
+    return float((a @ g @ a) / (4.0 * (a @ a) ** 2))
 
 def ols_estimation(k: float, fgns: dict[int, np.ndarray]) -> tuple[float, float]:
     rows = len(fgns.keys())
@@ -142,7 +101,7 @@ def plot_log_log_scatter(timepoints: np.ndarray, h_values: list[float], noise: n
     ax.set_xlabel(r"$\log(m)$")
     ax.set_ylabel(rf"$\log(S_N({k},m))$")
     ax.set_title("Log-log scaling of absolute moments with OLS fits")
-    ax.legend(title="true H (estimated slope)", loc="lower right", fontsize=6,
+    ax.legend(loc="lower right", fontsize=6,
               title_fontsize=7, framealpha=0.9)
     fig.tight_layout()
     return fig
@@ -254,8 +213,10 @@ def consistency_boxplots(rng, h_values: list[float], lags: list[int], k: float, 
 
     return fig
 
-def var_vs_n_plot(min_n: int, max_n: int, rng, h_values:list[float], lags: list[int], k: float,
+def var_vs_n_plot(min_n: int, max_n: int, rng, h_values:list[float], lags: list[int],
                   simulation_count: int, num_points: int = 25):
+    # fixed to k = 2, which is what the asymptotic variance below is derived for
+    k = 2.0
     if max_n <= min_n:
         raise ValueError(f"max_n = {max_n} is too small")
     if min_n <= max(lags):
@@ -281,7 +242,7 @@ def var_vs_n_plot(min_n: int, max_n: int, rng, h_values:list[float], lags: list[
                 label=rf"$H={h:.2f}$")
         # asymptotic variance sigma^2_OLS is only defined for H < 3/4
         if h < 0.75:
-            ax.axhline(asymptotic_variance(k, lags, h), color=h_colour(h), linestyle="--",
+            ax.axhline(asymptotic_variance(lags, h), color=h_colour(h), linestyle="--",
                        linewidth=1.0, alpha=0.7)
     ax.set_xscale("log")
     ax.set_ylim(0, 1.5)
@@ -293,6 +254,40 @@ def var_vs_n_plot(min_n: int, max_n: int, rng, h_values:list[float], lags: list[
             label=r"$\sigma^2_{\mathrm{OLS}}$ (theory)")
     ax.legend(title="true $H$", fontsize=8, title_fontsize=9, framealpha=0.9)
     fig.tight_layout()
+
+    return fig
+
+def moment_stability_plot(moments: list[float], h: float, rng, sample_size: int, lags: list[int]):
+    timepoints = np.linspace(1/sample_size, 1, sample_size)
+    noise = rng.normal(0, 1, sample_size)
+    fbm = fbms.simulate_fbm(timepoints, h, noise)
+    fgns = {lag: fbms.simulate_fgn(fbm, lag) for lag in lags}
+    # the scaling exponent of the k-th moment: under self-similarity it equals k * H,
+    # so the estimates have to fall on a straight line through the origin
+    k_grid = np.array(moments)
+    exponents = np.array([ols_estimation(k, fgns)[1] * k for k in moments])
+
+    fig, ax = plt.subplots(figsize=(6.0, 4.2), layout="constrained")
+    colour = h_colour(h)
+    upper_k = float(k_grid.max()) * 1.04
+
+    ax.plot([0, upper_k], [0, h * upper_k], color="#c0392b", linestyle="--", linewidth=1.0,
+            zorder=2, label=rf"$kH$, $H = {h}$")
+    ax.plot(k_grid, exponents, color=colour, linewidth=0.9, alpha=0.55, zorder=3)
+    ax.scatter(k_grid, exponents, s=14, color=colour, zorder=4, label=r"$k\hat H$")
+
+    ax.set_xlim(0, upper_k)
+    ax.set_ylim(0, float(max(exponents.max(), h * upper_k)) * 1.06)
+    ax.set_xticks([0.0, *k_grid])
+    ax.set_xlabel("$k$", fontsize=10)
+    ax.set_ylabel(r"$k\hat H$", fontsize=10)
+    ax.set_title("Scaling exponent of the absolute moments", fontsize=12, pad=10)
+    ax.tick_params(labelsize=9, length=3, width=0.8)
+    ax.grid(alpha=0.18, linewidth=0.5)
+    ax.set_axisbelow(True)
+    ax.spines[["top", "right"]].set_visible(False)
+    ax.spines[["left", "bottom"]].set_linewidth(0.8)
+    ax.legend(loc="upper left", fontsize=9, frameon=False, handlelength=1.6)
 
     return fig
 
@@ -309,12 +304,15 @@ def main() -> None:
                                 1000)
     consistent = Path(__file__).with_name("consistency_boxplots.pdf")
     fig4.savefig(consistent, format="pdf", bbox_inches="tight")
-    fig5 = var_vs_n_plot(6, 5000, rng, hurst_values, list(range(1,5)), 2, 300)
+    fig5 = var_vs_n_plot(6, 16000, rng, hurst_values, list(range(1,5)), 10000, num_points=35)
     var_vs_n = Path(__file__).with_name("var_vs_n.pdf")
     fig5.savefig(var_vs_n, format="pdf", bbox_inches="tight")
     fig6 = distribution_check_plot(1000, 2, [0.1, 0.5, 0.9], rng, list(range(1, 10)), 3000)
     distr = Path(__file__).with_name("distribution_check.pdf")
     fig6.savefig(distr, format="pdf", bbox_inches="tight")
+    fig7 = moment_stability_plot([0.5, 1, 1.5, 2, 3], 0.2, rng, 3500, list(range(1,31)))
+    stabl = Path(__file__).with_name("moment_stability_check.pdf")
+    fig7.savefig(stabl, format="pdf", bbox_inches="tight")
     plt.show()
 
 
