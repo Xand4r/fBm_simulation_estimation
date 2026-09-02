@@ -19,5 +19,10 @@ __pycache__/
 *.pdf
 *.png
 
+# Raw exchange downloads (re-downloadable) and the datasets built from them
+raw/
+data/
+*.zip
+
 # OS files
 .DS_Store

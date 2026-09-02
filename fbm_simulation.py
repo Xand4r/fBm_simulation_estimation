@@ -24,8 +24,8 @@ def cov_matrix(timepoints: np.ndarray, H: float) -> np.ndarray:
 
 def simulate_fbm(timepoints: np.ndarray, H: float, noise: np.ndarray) -> np.ndarray:
     """Simulate one fBm path at the given timepoints via Cholesky factorisation
-    of the covariance matrix. `noise` is a vector of standard normals; reusing
-    the same `noise` across different H isolates the effect of H on the path.
+    of the covariance matrix. `noise` is a vector of standard normals, and
+    reusing the same one across different H isolates the effect of H.
     """
     if not (0 < H < 1):
         raise ValueError(f"H must be in (0, 1), got {H}")
@@ -33,26 +33,25 @@ def simulate_fbm(timepoints: np.ndarray, H: float, noise: np.ndarray) -> np.ndar
     return chol @ noise
 
 def simulate_fgn(b_H: np.ndarray, lag: int) -> np.ndarray:
-    """Increments of a precomputed fBm path at the given lag:
-    x_t = B_H(t + lag) - B_H(t). Taking the fBm path as input (instead of
-    recomputing it) avoids repeating the Cholesky factorisation when the same
-    path is evaluated at many lags."""
+    """Increments of a precomputed fBm path at the given lag,
+    x_t = B_H(t + lag) - B_H(t). Taking the path as input instead of recomputing
+    it avoids repeating the Cholesky factorisation across many lags."""
     if lag <= 0:
         raise ValueError(f"lag must be positive, got {lag}")
     return b_H[lag:] - b_H[:-lag]
 
 
 def _round_step(value: float) -> float:
-    """Rounding step for a bound: 0.1 for numbers of magnitude >= 1, otherwise
-    the place of the biggest non-zero decimal (e.g. 0.0048 -> step 0.001)."""
+    """Rounding step for a bound: 0.1 for magnitudes >= 1, otherwise the place of
+    the biggest non-zero decimal, so 0.0048 gives a step of 0.001."""
     if value == 0:
         return 0.1
     return min(0.1, 10.0 ** np.floor(np.log10(abs(value))))
 
 
 def _round_bound(value: float, direction: str) -> tuple[float, str]:
-    """Round `value` outward ('up' or 'down') to its step and return the rounded
-    value together with a label formatted with a matching number of decimals."""
+    """Round `value` outward ('up' or 'down') to its step, returning the rounded
+    value and a label with a matching number of decimals."""
     step = _round_step(value)
     rounded = float((np.ceil if direction == "up" else np.floor)(value / step) * step)
     decimals = max(1, int(-np.floor(np.log10(step))))
@@ -85,8 +84,7 @@ def plot_paths(timepoints: np.ndarray, hurst_values, paths) -> Figure:
                     va="center", textcoords="offset points", fontsize=10)
         ax.annotate(f"${lo_label}$", xy=(0, lo), xytext=(-6, 0), ha="right",
                     va="center", textcoords="offset points", fontsize=10)
-        # remove the box borders
-        for spine in ax.spines.values():
+        for spine in ax.spines.values():  # no box border
             spine.set_visible(False)
         # no numbers on the axes
         ax.set_xticks([])

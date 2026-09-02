@@ -1,3 +1,6 @@
 numpy==2.5.0
 matplotlib==3.11.0
 scipy==1.18.0
+pandas==3.0.5
+requests==2.34.2
+binance-bulk-downloader==1.1.0.1

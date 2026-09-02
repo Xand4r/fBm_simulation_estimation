@@ -4,15 +4,15 @@ from scipy.stats import norm
 import fbm_simulation as fbms
 from pathlib import Path
 
-# Hurst values in their canonical order. Every figure takes a value's colour from
-# its position here rather than from its position in the list it was called with,
-# so a plot showing only a subset of the values still colours them consistently.
+# Hurst values in their canonical order. Colours are taken from a value's position
+# here, not from its position in the list a figure was called with, so a plot of
+# only a subset still colours them consistently.
 H_PALETTE_ORDER = (0.1, 0.3, 0.5, 0.7, 0.9)
 
 def h_colour(h: float) -> str:
-    """Colour-cycle entry assigned to a Hurst value. Values outside the canonical
-    grid fall back to the nearest one, so they stay comparable to their neighbour
-    (but two such values may end up sharing a colour)."""
+    """Colour-cycle entry for a Hurst value. Values off the canonical grid fall
+    back to the nearest one, which keeps them comparable to their neighbour but
+    can make two such values share a colour."""
     idx = min(range(len(H_PALETTE_ORDER)), key=lambda i: abs(H_PALETTE_ORDER[i] - h))
     return f"C{idx}"
 
@@ -29,7 +29,7 @@ def cross_stepsize_correlation(stepsize_1: int, stepsize_2: int, lag, h: float):
     For fBm, Cov(X^{(m)}_0, X^{(m')}_i)
         = 1/2 [ |m-i|^{2H} + |i+m'|^{2H} - |m-i-m'|^{2H} - |i|^{2H} ],
     and Var(X^{(m)}) = m^{2H}, so dividing by m^H m'^H gives the correlation.
-    `lag` may be a scalar or an array (the result is broadcast accordingly)."""
+    `lag` may be a scalar or an array, in which case the result is broadcast."""
     if not (0 < h < 1):
         raise ValueError(f"H must be in (0, 1), got {h}")
     if stepsize_1 <= 0 or stepsize_2 <= 0:
@@ -47,11 +47,12 @@ def asymptotic_variance(lags: list[int], h: float, max_corr_lag: int = 20000) ->
         sigma^2_OLS = A^t G A / (4 ||A||^4),   g_{m,m'} = 2 * sum_i rho_{m,m'}(i)^2,
 
     with A_m = log(m) - mean_m log(m) the centred log-lags (the covariate is
-    2*log m, hence the 4 = k^2). The Hermite expansion behind G is a single term
-    here because |x|^2 - E|Z|^2 = H_2(x), so c_2 = 2 and c_{2j} = 0 for j >= 2.
+    2*log m, hence the 4 = k^2). The Hermite expansion behind G collapses to a
+    single term here, since |x|^2 - E|Z|^2 = H_2(x) gives c_2 = 2 and c_{2j} = 0
+    for j >= 2.
 
-    The i-sum converges iff H < 3/4; it is truncated at `max_corr_lag`, and its
-    terms decay like i^{4H-4}, so raise that near H = 3/4."""
+    The i-sum converges iff H < 3/4 and is truncated at `max_corr_lag`. Its terms
+    decay like i^{4H-4}, so that bound needs raising near H = 3/4."""
     if not 0 < h < 0.75:
         raise ValueError(f'asymptotic variance requires 0 < H < 3/4, got {h}')
 
@@ -124,7 +125,7 @@ def distribution_check_plot(simulation_count: int, k: float, h_values: list[floa
     fig.suptitle("Distribution of the Centered Estimator", fontsize=16)
 
     z_scores = {h: np.asarray(centered_estimates[h]) / np.std(centered_estimates[h]) for h in h_values}
-    # plotting positions, centered in their 1/M slice so the extremes stay finite
+    # plotting positions centered in their 1/M slice, keeping the extremes finite
     plot_positions = (np.arange(1, simulation_count + 1) - 0.5) / simulation_count
     normal_quantiles = norm.ppf(plot_positions)
     grid = np.linspace(-4.0, 4.0, 400)
@@ -165,7 +166,7 @@ def distribution_check_plot(simulation_count: int, k: float, h_values: list[floa
 
 def consistency_boxplots(rng, h_values: list[float], lags: list[int], k: float, sample_sizes: list[int],
                          simulation_count: int):
-    # estimates[h][n] -> list of estimated slopes H-hat over the simulations
+    # estimates[h][n] holds the estimated slopes H-hat over all simulations
     estimates = {h: {n: [] for n in sample_sizes} for h in h_values}
     for n in sample_sizes:
         timepoints = np.linspace(1/n, 1, n)
@@ -225,7 +226,7 @@ def var_vs_n_plot(min_n: int, max_n: int, rng, h_values:list[float], lags: list[
     timepoints = np.linspace(1/max_n, 1, max_n)
     estimates = {h: {n: [] for n in n_values} for h in h_values}
     for h in h_values:
-        # calculate cholesky matrix here once for efficiency reasons and only then multiply with noise vector in loop
+        # factorise once outside the loop and only multiply by the noise vector inside
         chol = np.linalg.cholesky(fbms.cov_matrix(timepoints, h))
         for _ in range(simulation_count):
             fbm_full = chol @ rng.normal(0, 1, max_n)
@@ -262,8 +263,8 @@ def moment_stability_plot(moments: list[float], h: float, rng, sample_size: int,
     noise = rng.normal(0, 1, sample_size)
     fbm = fbms.simulate_fbm(timepoints, h, noise)
     fgns = {lag: fbms.simulate_fgn(fbm, lag) for lag in lags}
-    # the scaling exponent of the k-th moment: under self-similarity it equals k * H,
-    # so the estimates have to fall on a straight line through the origin
+    # scaling exponent of the k-th moment, which under self-similarity is k * H,
+    # so the estimates have to fall on a line through the origin
     k_grid = np.array(moments)
     exponents = np.array([ols_estimation(k, fgns)[1] * k for k in moments])
 
