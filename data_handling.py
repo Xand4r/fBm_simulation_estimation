@@ -1,7 +1,7 @@
-'''
+"""
 Collects the Hurst-parameter estimates for all assets used in the thesis and
 checks the stylized facts the estimator relies on.
-'''
+"""
 from pathlib import Path
 from typing import NamedTuple
 
@@ -43,12 +43,7 @@ class Series(NamedTuple):
 
 
 def load_log_rv() -> dict[str, Series]:
-    """Daily log realized variance per symbol.
-
-    RV is right-skewed and bounded below by zero, so the estimator is applied to
-    log RV, which is the quantity the rough-volatility literature models as fBm.
-    Increments are taken by index, so one row has to be one time step: BTC rows
-    are consecutive calendar days, the VOLARE panels are in trading days."""
+    """Daily log realized variance per symbol."""
     series: dict[str, Series] = {}
 
     for asset_class, (path, column) in ASSET_FILES.items():
@@ -69,12 +64,7 @@ def load_log_rv() -> dict[str, Series]:
 
 
 def add_weekday_variant(series: dict[str, Series], symbol: str = "BTCUSDT") -> dict[str, Series]:
-    """Drop Saturday and Sunday from a 24/7 series, added alongside the original.
-
-    Weekend volume is 35% and trade count 37% below weekday levels, putting RV at
-    roughly half the weekday level. On a calendar-day index that seasonality
-    aliases into lags that are multiples of 7, where both ends of an increment
-    fall on the same weekday and the moment drops."""
+    """Drop Saturday and Sunday from a 24/7 series."""
     asset_class, log_rv, dates = series[symbol]
     keep = dates.dayofweek.to_numpy() < 5
     series[f"{symbol}_noweekend"] = Series(asset_class, log_rv[keep], dates[keep])
@@ -97,15 +87,16 @@ def estimate_hurst(log_rv: np.ndarray, lags: list[int], k: float) -> float:
 
 
 def hurst_table(series: dict[str, Series], lags: list[int], moments: list[float]) -> pd.DataFrame:
-    """H_hat for every symbol at every moment order, plus the through-origin
-    monoscaling fit and the worst deviation of zeta(k) from that line."""
+    """H_hat for every symbol at every moment order."""
     k_grid = np.array(moments)
     rows = []
-    for symbol, (asset_class, log_rv, _) in series.items():
+    for symbol, (asset_class, log_rv, dates) in series.items():
         estimates = np.array([estimate_hurst(log_rv, lags, k) for k in moments])
         exponents = estimates * k_grid
         h_mono = float(k_grid @ exponents / (k_grid @ k_grid))
-        rows.append({"symbol": symbol, "class": asset_class, "n": len(log_rv),
+        rows.append({"symbol": symbol, "class": asset_class,
+                     "start": dates[0].date(), "end": dates[-1].date(),
+                     "n": len(log_rv),
                      **{f"H(k={k})": h for k, h in zip(moments, estimates)},
                      "H_mono": h_mono,
                      "max_dev": float(np.abs(exponents - h_mono * k_grid).max())})
@@ -191,11 +182,7 @@ def increment_gaussianity(series: dict[str, Series], symbol: str, lags: list[int
     red    N(mean, var) fitted to that lag's increments; closeness to the
            histogram is Gaussianity of the increments.
     blue   the m = 1 fit with both moments stretched by m^H; closeness to the red
-           curve is self-similarity with exponent H, i.e. the wider distribution
-           at lag m is the 1-day one rescaled and not a differently shaped law.
-
-    Standardising each lag separately would make the two curves coincide by
-    construction and destroy the second claim."""
+           curve is self-similarity with exponent H."""
     asset_class, log_rv, _ = series[symbol]
     colour = CLASS_COLOURS[asset_class]
     h = estimate_hurst(log_rv, LAGS, k)
